@@ -825,14 +825,16 @@ export function prepareAntigravityRequest(
           stripInjectedDebugFromRequestPayload(req as Record<string, unknown>);
 
           if (isClaudeModel) {
+            // Step 1: Strip corrupted/unsigned thinking blocks FIRST
+            deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
+
+            // Step 2: THEN inject signed thinking from cache (after stripping)
             if (isClaudeThinkingModel && Array.isArray((req as any).contents)) {
               (req as any).contents = ensureThinkingBeforeToolUseInContents((req as any).contents, signatureSessionKey);
             }
             if (isClaudeThinkingModel && Array.isArray((req as any).messages)) {
               (req as any).messages = ensureThinkingBeforeToolUseInMessages((req as any).messages, signatureSessionKey);
             }
-
-            deepFilterThinkingBlocks(req, signatureSessionKey, getCachedSignature, true);
           }
         }
 
@@ -1182,6 +1184,10 @@ export function prepareAntigravityRequest(
         // Attempts to restore signatures from cache for multi-turn conversations
         // Handle both Gemini-style contents[] and Anthropic-style messages[] payloads.
         if (isClaudeModel) {
+          // Step 1: Strip corrupted/unsigned thinking blocks FIRST
+          deepFilterThinkingBlocks(requestPayload, signatureSessionKey, getCachedSignature, true);
+
+          // Step 2: THEN inject signed thinking from cache (after stripping)
           if (isClaudeThinkingModel && Array.isArray(requestPayload.contents)) {
             requestPayload.contents = ensureThinkingBeforeToolUseInContents(requestPayload.contents, signatureSessionKey);
           }
@@ -1189,8 +1195,7 @@ export function prepareAntigravityRequest(
             requestPayload.messages = ensureThinkingBeforeToolUseInMessages(requestPayload.messages, signatureSessionKey);
           }
 
-          deepFilterThinkingBlocks(requestPayload, signatureSessionKey, getCachedSignature, true);
-
+          // Step 3: Check if warmup needed (AFTER injection attempt)
           if (isClaudeThinkingModel) {
             const hasToolUse =
               (Array.isArray(requestPayload.contents) && hasToolUseInContents(requestPayload.contents)) ||

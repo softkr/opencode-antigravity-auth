@@ -42,6 +42,24 @@ The nuclear option is simpler and more robust: just strip all thinking blocks fr
 3. **Deep filtering**: Payload is walked recursively; nested `messages[]` or `contents[]` arrays are filtered
 4. **Tool block preservation**: Tool blocks are always preserved to maintain tool call/result pairing
 
+## Strip-Then-Inject Order (Critical for Tool Use)
+
+For Claude thinking models with tool_use, operations MUST follow this order:
+
+```
+Step 1: deepFilterThinkingBlocks()     // Strip ALL thinking from request
+Step 2: ensureThinkingBeforeToolUse()  // Inject signed thinking from cache
+Step 3: Check needsSignedThinkingWarmup // Trigger warmup if no cache
+```
+
+**Why this order matters:**
+- Claude API requires assistant messages with tool_use to START with a thinking block
+- Incoming requests may have corrupted/unsigned thinking (from SDK transformations)
+- We strip first (clean slate), then inject valid cached signatures
+- If cache is empty, warmup request populates it before the real request
+
+**Wrong order causes:** `Expected 'thinking' or 'redacted_thinking', but found 'text'`
+
 ## Implementation
 
 ```typescript
