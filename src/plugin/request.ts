@@ -51,6 +51,7 @@ import {
   normalizeGeminiTools,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
 } from "./transform";
+import { detectErrorType } from "./recovery";
 
 const log = createLogger("request");
 
@@ -1566,6 +1567,16 @@ export async function transformAntigravityResponse(
         const debugInfo = `\n\n[Debug Info]\nRequested Model: ${requestedModel || "Unknown"}\nEffective Model: ${effectiveModel || "Unknown"}\nProject: ${projectId || "Unknown"}\nEndpoint: ${endpoint || "Unknown"}\nStatus: ${response.status}\nRequest ID: ${headers.get("x-request-id") || "N/A"}${toolDebugMissing !== undefined ? `\nTool Debug Missing: ${toolDebugMissing}` : ""}${toolDebugSummary ? `\nTool Debug Summary: ${toolDebugSummary}` : ""}${toolDebugPayload ? `\nTool Debug Payload: ${toolDebugPayload}` : ""}`;
         const injectedDebug = debugText ? `\n\n${debugText}` : "";
         errorBody.error.message = (errorBody.error.message || "Unknown error") + debugInfo + injectedDebug;
+
+        // Check if this is a recoverable thinking error - throw to trigger retry
+        const errorType = detectErrorType(errorBody.error.message || "");
+        if (errorType === "thinking_block_order") {
+          const recoveryError = new Error("THINKING_RECOVERY_NEEDED");
+          (recoveryError as any).recoveryType = errorType;
+          (recoveryError as any).originalError = errorBody;
+          (recoveryError as any).debugInfo = debugInfo;
+          throw recoveryError;
+        }
 
         return new Response(JSON.stringify(errorBody), {
           status: response.status,
