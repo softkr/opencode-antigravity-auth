@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { AccountManager } from "./accounts";
 import type { OAuthAuthDetails } from "./types";
 import { getPublicModelName } from "./transform/model-resolver";
@@ -49,7 +49,7 @@ describe("Model-specific Gemini quota", () => {
     expect(manager.getAvailableHeaderStyle(account, "gemini", modelFlash)).toBe("antigravity");
   });
 
-  it("switches account only when both header styles are exhausted for the specific model", () => {
+  it("returns null when all header styles are exhausted for the specific model on a single account", () => {
     // Add a second account
     const auth2: OAuthAuthDetails = {
       type: "oauth",
