@@ -107,6 +107,21 @@ Create `~/.config/opencode/opencode.json`:
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
+        "gemini-3-pro-low": {
+          "name": "Gemini 3 Pro Low (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-pro-high": {
+          "name": "Gemini 3 Pro High (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
         "antigravity-claude-sonnet-4-5": {
           "name": "Claude Sonnet 4.5 (Antigravity)",
           "limit": { "context": 200000, "output": 64000 },
@@ -141,7 +156,7 @@ Create `~/.config/opencode/opencode.json`:
           "name": "Claude Opus 4.5 Think High (Antigravity)",
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
-        },
+        }
       }
     }
   }
@@ -175,17 +190,18 @@ Models with `antigravity-` prefix use Antigravity quota:
 | `google/antigravity-claude-opus-4-5-thinking-medium` | Opus with 16K thinking budget |
 | `google/antigravity-claude-opus-4-5-thinking-high` | Opus with 32K thinking budget |
 
+> **Backward compatibility:** Old model names (`gemini-3-pro-low`, `gemini-3-pro-high`, `gemini-3-flash`) still work as a fallback. However, you should update to the `antigravity-` prefix for stability. See [Migration Guide](#migration-guide-v127).
+
 ### Gemini CLI Quota
 
-Models without `antigravity-` prefix use Gemini CLI quota:
+Models with `-preview` suffix use Gemini CLI quota:
 
 | Model | Description |
 |-------|-------------|
 | `google/gemini-2.5-flash` | Gemini 2.5 Flash |
 | `google/gemini-2.5-pro` | Gemini 2.5 Pro |
-| `google/gemini-3-flash` | Gemini 3 Flash |
-| `google/gemini-3-pro-low` | Gemini 3 Pro with low thinking |
-| `google/gemini-3-pro-high` | Gemini 3 Pro with high thinking |
+| `google/gemini-3-flash-preview` | Gemini 3 Flash (preview) |
+| `google/gemini-3-pro-preview` | Gemini 3 Pro (preview) |
 
 <details>
 <summary><b>Full models configuration</b></summary>
@@ -208,6 +224,21 @@ Models without `antigravity-` prefix use Gemini CLI quota:
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
         "antigravity-gemini-3-flash": {
+          "name": "Gemini 3 Flash (Antigravity)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-pro-low": {
+          "name": "Gemini 3 Pro Low (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-pro-high": {
+          "name": "Gemini 3 Pro High (Antigravity)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash": {
           "name": "Gemini 3 Flash (Antigravity)",
           "limit": { "context": 1048576, "output": 65536 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
@@ -247,6 +278,26 @@ Models without `antigravity-` prefix use Gemini CLI quota:
           "limit": { "context": 200000, "output": 64000 },
           "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
         },
+        "gemini-2.5-flash": {
+          "name": "Gemini 2.5 Flash (CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-2.5-pro": {
+          "name": "Gemini 2.5 Pro (CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-flash-preview": {
+          "name": "Gemini 3 Flash Preview (CLI)",
+          "limit": { "context": 1048576, "output": 65536 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        },
+        "gemini-3-pro-preview": {
+          "name": "Gemini 3 Pro Preview (CLI)",
+          "limit": { "context": 1048576, "output": 65535 },
+          "modalities": { "input": ["text", "image", "pdf"], "output": ["text"] }
+        }
       }
     }
   }
@@ -415,14 +466,30 @@ When spawning parallel subagents, multiple processes may select the same account
 
 If upgrading from v1.2.6 or earlier:
 
-### Breaking Changes
+### What Changed
 
-| Old (v1.2.6) | New (v1.2.7+) |
-|--------------|---------------|
-| `gemini-3-pro` | `google/antigravity-gemini-3-pro-low` |
-| `claude-sonnet-4-5` | `google/antigravity-claude-sonnet-4-5` |
+v1.2.7+ uses explicit prefixes to distinguish quota sources:
 
-### Step 1: Clear Old Tokens (Optional do this if you have issue cannot call models)
+| Model Type | New Name (Recommended) | Old Name (Still Works) |
+|------------|------------------------|------------------------|
+| Gemini 3 (Antigravity) | `antigravity-gemini-3-pro-low` | `gemini-3-pro-low` |
+| Gemini 3 (Antigravity) | `antigravity-gemini-3-pro-high` | `gemini-3-pro-high` |
+| Gemini 3 (Antigravity) | `antigravity-gemini-3-flash` | `gemini-3-flash` |
+| Gemini 3 (CLI) | `gemini-3-pro-preview` | N/A |
+| Claude | `antigravity-claude-sonnet-4-5` | `claude-sonnet-4-5` |
+
+### Action Required
+
+**Update your config to use `antigravity-` prefix:**
+
+```diff
+- "gemini-3-pro-low": { ... }
++ "antigravity-gemini-3-pro-low": { ... }
+```
+
+> **Why update?** Old names work now as a fallback, but this depends on Gemini CLI using `-preview` suffix. If Google removes `-preview` in the future, old names may route to the wrong quota. The `antigravity-` prefix is explicit and stable.
+
+### Step 1: Clear Old Tokens (Optional - do this if you have issues calling models)
 
 ```bash
 rm -rf ~/.config/opencode/antigravity-account.json

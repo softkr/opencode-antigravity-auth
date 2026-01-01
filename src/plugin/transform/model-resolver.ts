@@ -72,6 +72,26 @@ const QUOTA_PREFIX_REGEX = /^antigravity-/i;
 const ANTIGRAVITY_ONLY_MODELS = /^(claude|gpt)/i;
 
 /**
+ * Legacy Gemini 3 model names that should route to Antigravity quota.
+ *
+ * Backward compatibility: Since Gemini CLI now uses -preview suffix
+ * (gemini-3-pro-preview, gemini-3-flash-preview), old model names
+ * without -preview can safely route to Antigravity quota.
+ *
+ * Matches:
+ * - gemini-3-pro-low, gemini-3-pro-high
+ * - gemini-3-flash, gemini-3-flash-low, gemini-3-flash-medium, gemini-3-flash-high
+ *
+ * Does NOT match:
+ * - gemini-3-pro-preview (Gemini CLI)
+ * - gemini-3-flash-preview (Gemini CLI)
+ * - antigravity-gemini-3-* (already handled by prefix)
+ *
+ * WARNING: This may break if Google/Opencode removes the -preview suffix.
+ */
+const LEGACY_ANTIGRAVITY_GEMINI3 = /^gemini-3-(pro-(low|high)|flash(-low|-medium|-high)?)$/i;
+
+/**
  * Models that support thinking tier suffixes.
  * Only these models should have -low/-medium/-high stripped as thinking tiers.
  * GPT models like gpt-oss-120b-medium should NOT have -medium stripped.
@@ -129,17 +149,20 @@ function isThinkingCapableModel(model: string): boolean {
 /**
  * Resolves a model name with optional tier suffix and quota prefix to its actual API model name
  * and corresponding thinking configuration.
- * 
+ *
  * Quota routing:
  * - "antigravity-" prefix → Antigravity quota
  * - Claude/GPT models → Antigravity quota (auto, these only exist on Antigravity)
+ * - Legacy Gemini 3 names (gemini-3-pro-low, gemini-3-flash, etc.) → Antigravity quota (backward compat)
  * - Other models → Gemini CLI quota (default)
- * 
+ *
  * Examples:
- * - "gemini-2.5-flash" → { actualModel: "gemini-2.5-flash", quotaPreference: "gemini-cli" }
- * - "antigravity-gemini-3-pro-high" → { actualModel: "gemini-3-pro", thinkingLevel: "high", quotaPreference: "antigravity" }
- * - "claude-sonnet-4-5-thinking-medium" → { actualModel: "claude-sonnet-4-5-thinking", thinkingBudget: 16384, quotaPreference: "antigravity" }
- * 
+ * - "gemini-2.5-flash" → { quotaPreference: "gemini-cli" }
+ * - "gemini-3-pro-preview" → { quotaPreference: "gemini-cli" } (Gemini CLI uses -preview)
+ * - "gemini-3-pro-low" → { quotaPreference: "antigravity" } (legacy name, backward compat)
+ * - "antigravity-gemini-3-pro-high" → { quotaPreference: "antigravity" } (explicit prefix)
+ * - "claude-sonnet-4-5-thinking-medium" → { quotaPreference: "antigravity" } (Claude only on Antigravity)
+ *
  * @param requestedModel - The model name from the request
  * @returns Resolved model with thinking configuration
  */
@@ -151,7 +174,8 @@ export function resolveModelWithTier(requestedModel: string): ResolvedModel {
   const baseName = tier ? modelWithoutQuota.replace(TIER_REGEX, "") : modelWithoutQuota;
 
   const isAntigravityOnly = ANTIGRAVITY_ONLY_MODELS.test(modelWithoutQuota);
-  const quotaPreference = isAntigravity || isAntigravityOnly ? "antigravity" : "gemini-cli";
+  const isLegacyAntigravity = LEGACY_ANTIGRAVITY_GEMINI3.test(modelWithoutQuota);
+  const quotaPreference = isAntigravity || isAntigravityOnly || isLegacyAntigravity ? "antigravity" : "gemini-cli";
   const explicitQuota = isAntigravity;
 
   const isGemini3 = modelWithoutQuota.toLowerCase().startsWith("gemini-3");
