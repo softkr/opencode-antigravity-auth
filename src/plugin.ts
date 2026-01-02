@@ -737,22 +737,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
       const authParts = parseRefreshParts(auth.refresh);
       const storedAccounts = await loadAccounts();
       
-      if (storedAccounts && storedAccounts.accounts.length > 0 && authParts.refreshToken) {
-        const hasMatchingAccount = storedAccounts.accounts.some(
-          (acc) => acc.refreshToken === authParts.refreshToken
-        );
-        
-        if (!hasMatchingAccount) {
-          // OpenCode's auth doesn't match any stored account - storage is stale
-          // Clear it and let the user re-authenticate
-          log.warn("Stored accounts don't match OpenCode's auth. Clearing stale storage.");
-          try {
-            await clearAccounts();
-          } catch {
-            // ignore
-          }
-        }
-      }
+      // Note: AccountManager now ensures the current auth is always included in accounts
 
       const accountManager = await AccountManager.loadFromDisk(auth);
       if (accountManager.getAccountCount() > 0) {
