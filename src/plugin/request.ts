@@ -27,6 +27,7 @@ import {
   DEFAULT_THINKING_BUDGET,
   deepFilterThinkingBlocks,
   extractThinkingConfig,
+  extractVariantThinkingConfig,
   extractUsageFromSsePayload,
   extractUsageMetadata,
   fixToolResponseGrouping,
@@ -54,6 +55,7 @@ import {
 import { sanitizeCrossModelPayloadInPlace } from "./transform/cross-model-sanitizer";
 import {
   resolveModelWithTier,
+  resolveModelWithVariant,
   isClaudeModel,
   isClaudeThinkingModel,
   CLAUDE_THINKING_MAX_OUTPUT_TOKENS,
@@ -632,9 +634,9 @@ export function prepareAntigravityRequest(
   const isClaude = isClaudeModel(resolved.actualModel);
   const isClaudeThinking = isClaudeThinkingModel(resolved.actualModel);
   
-  // Tier-based thinking configuration from model resolver
-  const tierThinkingBudget = resolved.thinkingBudget;
-  const tierThinkingLevel = resolved.thinkingLevel;
+  // Tier-based thinking configuration from model resolver (can be overridden by variant config)
+  let tierThinkingBudget = resolved.thinkingBudget;
+  let tierThinkingLevel = resolved.thinkingLevel;
   let signatureSessionKey = buildSignatureSessionKey(
     PLUGIN_SESSION_ID,
     effectiveModel,
@@ -722,6 +724,21 @@ export function prepareAntigravityRequest(
 
         const rawGenerationConfig = requestPayload.generationConfig as Record<string, unknown> | undefined;
         const extraBody = requestPayload.extra_body as Record<string, unknown> | undefined;
+
+        const variantConfig = extractVariantThinkingConfig(
+          requestPayload.providerOptions as Record<string, unknown> | undefined
+        );
+        if (variantConfig?.thinkingBudget) {
+          const isGemini3 = effectiveModel.toLowerCase().includes("gemini-3");
+          if (isGemini3) {
+            tierThinkingLevel = variantConfig.thinkingBudget <= 8192 ? "low" 
+              : variantConfig.thinkingBudget <= 16384 ? "medium" : "high";
+            tierThinkingBudget = undefined;
+          } else {
+            tierThinkingBudget = variantConfig.thinkingBudget;
+            tierThinkingLevel = undefined;
+          }
+        }
 
         if (isClaude) {
           if (!requestPayload.toolConfig) {

@@ -12,6 +12,16 @@
 import { z } from "zod";
 
 /**
+ * Account selection strategy for distributing requests across accounts.
+ * 
+ * - `sticky` (default): Use same account until rate-limited. Preserves prompt cache.
+ * - `round-robin`: Rotate to next account on every request. Maximum throughput.
+ * - `hybrid`: Touch all fresh accounts first to sync reset timers, then sticky.
+ */
+export const AccountSelectionStrategySchema = z.enum(['sticky', 'round-robin', 'hybrid']);
+export type AccountSelectionStrategy = z.infer<typeof AccountSelectionStrategySchema>;
+
+/**
  * Signature cache configuration for persisting thinking block signatures to disk.
  */
 export const SignatureCacheConfigSchema = z.object({
@@ -223,6 +233,13 @@ export const AntigravityConfigSchema = z.object({
    */
   quota_fallback: z.boolean().default(false),
   
+  /**
+   * Strategy for selecting accounts when making requests.
+   * Env override: OPENCODE_ANTIGRAVITY_ACCOUNT_SELECTION_STRATEGY
+   * @default "sticky"
+   */
+  account_selection_strategy: AccountSelectionStrategySchema.default('sticky'),
+  
   // =========================================================================
   // Auto-Update
   // =========================================================================
@@ -256,6 +273,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   proactive_refresh_check_interval_seconds: 300,
   max_rate_limit_wait_seconds: 300,
   quota_fallback: false,
+  account_selection_strategy: 'sticky',
   auto_update: true,
   signature_cache: {
     enabled: true,

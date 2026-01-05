@@ -51,6 +51,12 @@ import type {
 const MAX_OAUTH_ACCOUNTS = 10;
 const MAX_WARMUP_SESSIONS = 1000;
 const MAX_WARMUP_RETRIES = 2;
+const CAPACITY_BACKOFF_TIERS_MS = [5000, 10000, 20000, 30000, 60000];
+
+function getCapacityBackoffDelay(consecutiveFailures: number): number {
+  const index = Math.min(consecutiveFailures, CAPACITY_BACKOFF_TIERS_MS.length - 1);
+  return CAPACITY_BACKOFF_TIERS_MS[Math.max(0, index)] ?? 5000;
+}
 const warmupAttemptedSessionIds = new Set<string>();
 const warmupSucceededSessionIds = new Set<string>();
 
@@ -870,7 +876,12 @@ export const createAntigravityPlugin = (providerId: string) => async (
               throw new Error("No Antigravity accounts available. Run `opencode auth login`.");
             }
 
-            const account = accountManager.getCurrentOrNextForFamily(family, model);
+            const account = accountManager.getCurrentOrNextForFamily(
+              family, 
+              model, 
+              config.account_selection_strategy,
+              'antigravity'
+            );
             
             if (!account) {
               // All accounts are rate-limited - wait and retry
@@ -913,7 +924,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
 
             pushDebug(
-              `selected idx=${account.index} email=${account.email ?? ""} family=${family} accounts=${accountCount}`,
+              `selected idx=${account.index} email=${account.email ?? ""} family=${family} accounts=${accountCount} strategy=${config.account_selection_strategy}`,
             );
             if (isDebugEnabled()) {
               logAccountContext("Selected", {
@@ -1227,22 +1238,18 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   await logResponseBody(debugContext, response, 429);
 
                   if (isCapacityExhausted) {
-                    accountManager.markRateLimited(account, delayMs, family, headerStyle, model);
+                    const failures = account.consecutiveFailures ?? 0;
+                    const capacityBackoffMs = getCapacityBackoffDelay(failures);
+                    account.consecutiveFailures = failures + 1;
                     
-                    // For Gemini, try prioritized Antigravity across ALL accounts first
-                    if (family === "gemini" && headerStyle === "antigravity") {
-                      if (hasOtherAccountWithAntigravity(account)) {
-                        pushDebug(`capacity exhausted on account ${account.index}, but available on others. Switching account.`);
-                        shouldSwitchAccount = true;
-                        break;
-                      }
-                    }
+                    const backoffFormatted = formatWaitTime(capacityBackoffMs);
+                    pushDebug(`capacity exhausted on account ${account.index}, backoff=${capacityBackoffMs}ms (failure #${failures + 1})`);
 
                     await showToast(
-                      `Model capacity exhausted for ${family}. Retrying in ${waitTimeFormatted} (attempt ${attempt})...`,
+                      `⏳ Server at capacity. Waiting ${backoffFormatted}... (attempt ${failures + 1})`,
                       "warning",
                     );
-                    await sleep(delayMs, abortSignal);
+                    await sleep(capacityBackoffMs, abortSignal);
                     continue;
                   }
                   
@@ -1375,6 +1382,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 }
 
                 // Success or non-retryable error - return the response
+                if (response.ok) {
+                  account.consecutiveFailures = 0;
+                }
                 logAntigravityDebugResponse(debugContext, response, {
                   note: response.ok ? "Success" : `Error ${response.status}`,
                 });

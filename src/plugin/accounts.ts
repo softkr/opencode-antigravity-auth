@@ -1,8 +1,10 @@
 import { formatRefreshParts, parseRefreshParts } from "./auth";
 import { loadAccounts, saveAccounts, type AccountStorageV3, type RateLimitStateV3, type ModelFamily, type HeaderStyle, type CooldownReason } from "./storage";
 import type { OAuthAuthDetails, RefreshParts } from "./types";
+import type { AccountSelectionStrategy } from "./config/schema";
 
 export type { ModelFamily, HeaderStyle, CooldownReason } from "./storage";
+export type { AccountSelectionStrategy } from "./config/schema";
 
 export type BaseQuotaKey = "claude" | "gemini-antigravity" | "gemini-cli";
 export type QuotaKey = BaseQuotaKey | `${BaseQuotaKey}:${string}`;
@@ -19,6 +21,8 @@ export interface ManagedAccount {
   lastSwitchReason?: "rate-limit" | "initial" | "rotation";
   coolingDownUntil?: number;
   cooldownReason?: CooldownReason;
+  touchedForQuota: Record<string, number>;
+  consecutiveFailures?: number;
 }
 
 function nowMs(): number {
@@ -106,6 +110,10 @@ export class AccountManager {
     claude: -1,
     gemini: -1,
   };
+  private sessionOffsetApplied: Record<ModelFamily, boolean> = {
+    claude: false,
+    gemini: false,
+  };
   private lastToastAccountIndex = -1;
   private lastToastTime = 0;
 
@@ -153,6 +161,7 @@ export class AccountManager {
             lastSwitchReason: acc.lastSwitchReason,
             coolingDownUntil: acc.coolingDownUntil,
             cooldownReason: acc.cooldownReason,
+            touchedForQuota: {},
           };
         })
         .filter((a): a is ManagedAccount => a !== null);
@@ -189,6 +198,7 @@ export class AccountManager {
           access: authFallback.access,
           expires: authFallback.expires,
           rateLimitResetTimes: {},
+          touchedForQuota: {},
         };
         this.accounts.push(newAccount);
         // Update indices to include the new account
@@ -211,6 +221,7 @@ export class AccountManager {
             access: authFallback.access,
             expires: authFallback.expires,
             rateLimitResetTimes: {},
+            touchedForQuota: {},
           },
         ];
         this.cursor = 0;
@@ -254,18 +265,58 @@ export class AccountManager {
     this.lastToastTime = nowMs();
   }
 
-  getCurrentOrNextForFamily(family: ModelFamily, model?: string | null): ManagedAccount | null {
+  getCurrentOrNextForFamily(
+    family: ModelFamily, 
+    model?: string | null,
+    strategy: AccountSelectionStrategy = 'sticky',
+    headerStyle: HeaderStyle = 'antigravity'
+  ): ManagedAccount | null {
+    const quotaKey = getQuotaKey(family, headerStyle, model);
+
+    if (strategy === 'round-robin') {
+      const next = this.getNextForFamily(family, model);
+      if (next) {
+        this.markTouchedForQuota(next, quotaKey);
+        this.currentAccountIndexByFamily[family] = next.index;
+      }
+      return next;
+    }
+
+    if (strategy === 'hybrid') {
+      const freshAccounts = this.getFreshAccountsForQuota(quotaKey, family, model);
+      if (freshAccounts.length > 0) {
+        const fresh = freshAccounts[0];
+        if (fresh) {
+          fresh.lastUsed = nowMs();
+          this.markTouchedForQuota(fresh, quotaKey);
+          this.currentAccountIndexByFamily[family] = fresh.index;
+          return fresh;
+        }
+      }
+    }
+
+    // PID-based offset for multi-session distribution
+    // Different sessions (PIDs) will prefer different starting accounts
+    if (!this.sessionOffsetApplied[family] && this.accounts.length > 1) {
+      const pidOffset = process.pid % this.accounts.length;
+      const baseIndex = this.currentAccountIndexByFamily[family] ?? 0;
+      this.currentAccountIndexByFamily[family] = (baseIndex + pidOffset) % this.accounts.length;
+      this.sessionOffsetApplied[family] = true;
+    }
+
     const current = this.getCurrentAccountForFamily(family);
     if (current) {
       clearExpiredRateLimits(current);
       if (!isRateLimitedForFamily(current, family, model) && !this.isAccountCoolingDown(current)) {
         current.lastUsed = nowMs();
+        this.markTouchedForQuota(current, quotaKey);
         return current;
       }
     }
 
     const next = this.getNextForFamily(family, model);
     if (next) {
+      this.markTouchedForQuota(next, quotaKey);
       this.currentAccountIndexByFamily[family] = next.index;
     }
     return next;
@@ -325,6 +376,29 @@ export class AccountManager {
 
   getAccountCooldownReason(account: ManagedAccount): CooldownReason | undefined {
     return this.isAccountCoolingDown(account) ? account.cooldownReason : undefined;
+  }
+
+  markTouchedForQuota(account: ManagedAccount, quotaKey: string): void {
+    account.touchedForQuota[quotaKey] = nowMs();
+  }
+
+  isFreshForQuota(account: ManagedAccount, quotaKey: string): boolean {
+    const touchedAt = account.touchedForQuota[quotaKey];
+    if (!touchedAt) return true;
+    
+    const resetTime = account.rateLimitResetTimes[quotaKey as QuotaKey];
+    if (resetTime && touchedAt < resetTime) return true;
+    
+    return false;
+  }
+
+  getFreshAccountsForQuota(quotaKey: string, family: ModelFamily, model?: string | null): ManagedAccount[] {
+    return this.accounts.filter(acc => {
+      clearExpiredRateLimits(acc);
+      return this.isFreshForQuota(acc, quotaKey) && 
+             !isRateLimitedForFamily(acc, family, model) && 
+             !this.isAccountCoolingDown(acc);
+    });
   }
 
   isRateLimitedForHeaderStyle(
