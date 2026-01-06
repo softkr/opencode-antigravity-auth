@@ -23,6 +23,7 @@ import {
   cleanJSONSchemaForAntigravity,
   createSyntheticErrorResponse,
 } from "./request-helpers";
+import { deduplicateThinkingText, createThoughtBuffer } from "./core/streaming/transformer";
 
 describe("sanitizeThinkingPart (covered via filtering)", () => {
   it("extracts wrapped text and strips SDK fields for Gemini-style thought blocks", () => {
@@ -1580,5 +1581,134 @@ describe("extractVariantThinkingConfig", () => {
       anthropic: { thinking: { budgetTokens: 2000 } },
     });
     expect(result).toEqual({ thinkingBudget: 1000 });
+  });
+});
+
+describe("deduplicateThinkingText", () => {
+  function createTestBuffer() {
+    return createThoughtBuffer();
+  }
+
+  it("returns non-object input unchanged", () => {
+    const buffer = createTestBuffer();
+    expect(deduplicateThinkingText(null, buffer)).toBeNull();
+    expect(deduplicateThinkingText(undefined, buffer)).toBeUndefined();
+    expect(deduplicateThinkingText("string", buffer)).toBe("string");
+  });
+
+  it("extracts delta from accumulated Gemini thinking text", () => {
+    const buffer = createTestBuffer();
+    
+    const chunk1 = {
+      candidates: [{
+        content: {
+          parts: [{ thought: true, text: "Hello " }],
+        },
+      }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result1 = deduplicateThinkingText(chunk1, buffer) as any;
+    expect(result1.candidates[0].content.parts[0].text).toBe("Hello ");
+    
+    const chunk2 = {
+      candidates: [{
+        content: {
+          parts: [{ thought: true, text: "Hello world" }],
+        },
+      }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result2 = deduplicateThinkingText(chunk2, buffer) as any;
+    expect(result2.candidates[0].content.parts[0].text).toBe("world");
+  });
+
+  it("filters out empty delta parts", () => {
+    const buffer = createTestBuffer();
+    
+    const chunk1 = {
+      candidates: [{
+        content: {
+          parts: [{ thought: true, text: "Complete thought" }],
+        },
+      }],
+    };
+    deduplicateThinkingText(chunk1, buffer);
+    
+    const chunk2 = {
+      candidates: [{
+        content: {
+          parts: [
+            { thought: true, text: "Complete thought" },
+            { text: "Regular text" },
+          ],
+        },
+      }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result2 = deduplicateThinkingText(chunk2, buffer) as any;
+    expect(result2.candidates[0].content.parts).toHaveLength(1);
+    expect(result2.candidates[0].content.parts[0].text).toBe("Regular text");
+  });
+
+  it("extracts delta from accumulated Claude thinking blocks", () => {
+    const buffer = createTestBuffer();
+    
+    const chunk1 = {
+      content: [{ type: "thinking", thinking: "First " }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result1 = deduplicateThinkingText(chunk1, buffer) as any;
+    expect(result1.content[0].thinking).toBe("First ");
+    
+    const chunk2 = {
+      content: [{ type: "thinking", thinking: "First part" }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result2 = deduplicateThinkingText(chunk2, buffer) as any;
+    expect(result2.content[0].thinking).toBe("part");
+  });
+
+  it("handles new thinking content that does not start with sent text", () => {
+    const buffer = createTestBuffer();
+    
+    const chunk1 = {
+      candidates: [{
+        content: {
+          parts: [{ thought: true, text: "Old thought" }],
+        },
+      }],
+    };
+    deduplicateThinkingText(chunk1, buffer);
+    
+    const chunk2 = {
+      candidates: [{
+        content: {
+          parts: [{ thought: true, text: "New thought" }],
+        },
+      }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result2 = deduplicateThinkingText(chunk2, buffer) as any;
+    expect(result2.candidates[0].content.parts[0].text).toBe("New thought");
+  });
+
+  it("preserves non-thinking parts unchanged", () => {
+    const buffer = createTestBuffer();
+    
+    const chunk = {
+      candidates: [{
+        content: {
+          parts: [
+            { thought: true, text: "Thinking" },
+            { text: "Regular text" },
+            { functionCall: { name: "test" } },
+          ],
+        },
+      }],
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const result = deduplicateThinkingText(chunk, buffer) as any;
+    expect(result.candidates[0].content.parts[1].text).toBe("Regular text");
+    expect(result.candidates[0].content.parts[2].functionCall.name).toBe("test");
   });
 });

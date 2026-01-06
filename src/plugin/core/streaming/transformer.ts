@@ -42,10 +42,93 @@ export function transformStreamingPayload(
     .join('\n');
 }
 
+export function deduplicateThinkingText(
+  response: unknown,
+  sentBuffer: ThoughtBuffer,
+): unknown {
+  if (!response || typeof response !== 'object') return response;
+
+  const resp = response as Record<string, unknown>;
+
+  if (Array.isArray(resp.candidates)) {
+    const newCandidates = resp.candidates.map((candidate: unknown, index: number) => {
+      const cand = candidate as Record<string, unknown> | null;
+      if (!cand?.content) return candidate;
+
+      const content = cand.content as Record<string, unknown>;
+      if (!Array.isArray(content.parts)) return candidate;
+
+      const newParts = content.parts.map((part: unknown) => {
+        const p = part as Record<string, unknown>;
+        if (p.thought === true || p.type === 'thinking') {
+          const fullText = (p.text || p.thinking || '') as string;
+          const sentText = sentBuffer.get(index) ?? '';
+
+          if (fullText.startsWith(sentText)) {
+            const delta = fullText.slice(sentText.length);
+            sentBuffer.set(index, fullText);
+
+            if (delta) {
+              return { ...p, text: delta, thinking: delta };
+            }
+            return null;
+          }
+
+          sentBuffer.set(index, fullText);
+          return part;
+        }
+        return part;
+      });
+
+      const filteredParts = newParts.filter((p) => p !== null);
+
+      return {
+        ...cand,
+        content: { ...content, parts: filteredParts },
+      };
+    });
+
+    return { ...resp, candidates: newCandidates };
+  }
+
+  if (Array.isArray(resp.content)) {
+    let thinkingIndex = 0;
+    const newContent = resp.content.map((block: unknown) => {
+      const b = block as Record<string, unknown> | null;
+      if (b?.type === 'thinking') {
+        const fullText = (b.thinking || b.text || '') as string;
+        const sentText = sentBuffer.get(thinkingIndex) ?? '';
+
+        if (fullText.startsWith(sentText)) {
+          const delta = fullText.slice(sentText.length);
+          sentBuffer.set(thinkingIndex, fullText);
+          thinkingIndex++;
+
+          if (delta) {
+            return { ...b, thinking: delta, text: delta };
+          }
+          return null;
+        }
+
+        sentBuffer.set(thinkingIndex, fullText);
+        thinkingIndex++;
+        return block;
+      }
+      return block;
+    });
+
+    const filteredContent = newContent.filter((b) => b !== null);
+    return { ...resp, content: filteredContent };
+  }
+
+  return response;
+}
+
 export function transformSseLine(
   line: string,
   signatureStore: SignatureStore,
   thoughtBuffer: ThoughtBuffer,
+  sentThinkingBuffer: ThoughtBuffer,
   callbacks: StreamingCallbacks,
   options: StreamingOptions,
   debugState: { injected: boolean },
@@ -71,7 +154,8 @@ export function transformSseLine(
         );
       }
 
-      let response: unknown = parsed.response;
+      let response: unknown = deduplicateThinkingText(parsed.response, sentThinkingBuffer);
+
       if (options.debugText && callbacks.onInjectDebug && !debugState.injected) {
         response = callbacks.onInjectDebug(response, options.debugText);
         debugState.injected = true;
@@ -151,6 +235,7 @@ export function createStreamingTransformer(
   const encoder = new TextEncoder();
   let buffer = '';
   const thoughtBuffer = createThoughtBuffer();
+  const sentThinkingBuffer = createThoughtBuffer();
   const debugState = { injected: false };
 
   return new TransformStream({
@@ -165,6 +250,7 @@ export function createStreamingTransformer(
           line,
           signatureStore,
           thoughtBuffer,
+          sentThinkingBuffer,
           callbacks,
           options,
           debugState,
@@ -180,6 +266,7 @@ export function createStreamingTransformer(
           buffer,
           signatureStore,
           thoughtBuffer,
+          sentThinkingBuffer,
           callbacks,
           options,
           debugState,
