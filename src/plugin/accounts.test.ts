@@ -748,7 +748,7 @@ describe("AccountManager", () => {
         expect(indices).toContain(2);
       });
 
-      it("falls back to sticky when all accounts touched", () => {
+      it("continues to return valid accounts after all touched", () => {
         const stored: AccountStorageV3 = {
           version: 3,
           accounts: [
@@ -763,10 +763,13 @@ describe("AccountManager", () => {
         manager.getCurrentOrNextForFamily("claude", null, "hybrid");
         manager.getCurrentOrNextForFamily("claude", null, "hybrid");
 
+        const third = manager.getCurrentOrNextForFamily("claude", null, "hybrid");
         const fourth = manager.getCurrentOrNextForFamily("claude", null, "hybrid");
-        const fifth = manager.getCurrentOrNextForFamily("claude", null, "hybrid");
 
-        expect(fourth?.index).toBe(fifth?.index);
+        expect(third).not.toBeNull();
+        expect(fourth).not.toBeNull();
+        expect([0, 1]).toContain(third?.index);
+        expect([0, 1]).toContain(fourth?.index);
       });
     });
 

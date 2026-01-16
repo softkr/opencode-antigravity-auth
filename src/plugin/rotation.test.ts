@@ -251,7 +251,8 @@ describe("TokenBucketTracker", () => {
     it("reduces token balance", () => {
       const tracker = new TokenBucketTracker({ initialTokens: 50 });
       expect(tracker.consume(0, 1)).toBe(true);
-      expect(tracker.getTokens(0)).toBe(49);
+      // Use toBeCloseTo to handle floating point from micro-regeneration between calls
+      expect(tracker.getTokens(0)).toBeCloseTo(49, 2);
     });
 
     it("returns false when insufficient tokens", () => {
