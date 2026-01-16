@@ -48,7 +48,7 @@ function isOrbStackDockerHost(): boolean {
     
     // Check hostname pattern (OrbStack uses specific patterns)
     const hostname = process.env.HOSTNAME || "";
-    if (hostname.includes("orbstack") || hostname.includes("orb")) {
+    if (hostname.startsWith("orbstack-") || hostname.endsWith(".orb") || hostname === "orbstack") {
       return true;
     }
     
