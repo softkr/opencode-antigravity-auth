@@ -212,6 +212,7 @@ export function transformSseLine(
         response = callbacks.onInjectDebug(response, options.debugText);
         debugState.injected = true;
       }
+      // Note: onInjectSyntheticThinking removed - keep_thinking now uses debugText path
 
       const transformed = callbacks.transformThinkingParts
         ? callbacks.transformThinkingParts(response)
@@ -263,16 +264,25 @@ export function cacheThinkingSignaturesFromResponse(
   }
 
   if (Array.isArray(resp.content)) {
-    let thinkingText = '';
+    // Use thoughtBuffer to accumulate thinking text across SSE events
+    // Claude streams thinking content and signature in separate events
+    const CLAUDE_BUFFER_KEY = 0; // Use index 0 for Claude's single-stream content
     resp.content.forEach((block: unknown) => {
       const b = block as Record<string, unknown> | null;
       if (b?.type === 'thinking') {
-        thinkingText += (b.thinking || b.text || '') as string;
+        const text = (b.thinking || b.text || '') as string;
+        if (text) {
+          const current = thoughtBuffer.get(CLAUDE_BUFFER_KEY) ?? '';
+          thoughtBuffer.set(CLAUDE_BUFFER_KEY, current + text);
+        }
       }
-      if (b?.signature && thinkingText) {
-        const signature = b.signature as string;
-        onCacheSignature?.(signatureSessionKey, thinkingText, signature);
-        signatureStore.set(signatureSessionKey, { text: thinkingText, signature });
+      if (b?.signature) {
+        const fullText = thoughtBuffer.get(CLAUDE_BUFFER_KEY) ?? '';
+        if (fullText) {
+          const signature = b.signature as string;
+          onCacheSignature?.(signatureSessionKey, fullText, signature);
+          signatureStore.set(signatureSessionKey, { text: fullText, signature });
+        }
       }
     });
   }

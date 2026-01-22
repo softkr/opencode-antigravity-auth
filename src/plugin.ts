@@ -352,7 +352,7 @@ async function persistAccountPool(
   });
 }
 
-function retryAfterMsFromResponse(response: Response): number {
+function retryAfterMsFromResponse(response: Response, defaultRetryMs: number = 60_000): number {
   const retryAfterMsHeader = response.headers.get("retry-after-ms");
   if (retryAfterMsHeader) {
     const parsed = Number.parseInt(retryAfterMsHeader, 10);
@@ -369,7 +369,7 @@ function retryAfterMsFromResponse(response: Response): number {
     }
   }
 
-  return 60_000;
+  return defaultRetryMs;
 }
 
 function parseDurationToMs(duration: string): number | null {
@@ -527,12 +527,14 @@ const emptyResponseAttempts = new Map<string, number>();
  * @param accountIndex - The account index
  * @param quotaKey - The quota key (e.g., "gemini-cli", "gemini-antigravity", "claude")
  * @param serverRetryAfterMs - Server-provided retry delay (if any)
+ * @param maxBackoffMs - Maximum backoff delay in milliseconds (default 60000)
  * @returns { attempt, delayMs, isDuplicate } - isDuplicate=true if within dedup window
  */
 function getRateLimitBackoff(
   accountIndex: number, 
   quotaKey: string,
-  serverRetryAfterMs: number | null
+  serverRetryAfterMs: number | null,
+  maxBackoffMs: number = 60_000
 ): { attempt: number; delayMs: number; isDuplicate: boolean } {
   const now = Date.now();
   const stateKey = `${accountIndex}:${quotaKey}`;
@@ -542,7 +544,7 @@ function getRateLimitBackoff(
   if (previous && (now - previous.lastAt < RATE_LIMIT_DEDUP_WINDOW_MS)) {
     // Same rate limit event from concurrent request - don't increment
     const baseDelay = serverRetryAfterMs ?? 1000;
-    const backoffDelay = Math.min(baseDelay * Math.pow(2, previous.consecutive429 - 1), 60_000);
+    const backoffDelay = Math.min(baseDelay * Math.pow(2, previous.consecutive429 - 1), maxBackoffMs);
     return { 
       attempt: previous.consecutive429, 
       delayMs: Math.max(baseDelay, backoffDelay),
@@ -562,7 +564,7 @@ function getRateLimitBackoff(
   });
   
   const baseDelay = serverRetryAfterMs ?? 1000;
-  const backoffDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), 60_000);
+  const backoffDelay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxBackoffMs);
   return { attempt, delayMs: Math.max(baseDelay, backoffDelay), isDuplicate: false };
 }
 
@@ -860,8 +862,13 @@ export const createAntigravityPlugin = (providerId: string) => async (
             }
           };
 
-          // Helper to show toast without blocking on abort
+          // Use while(true) loop to handle rate limits with backoff
+          // This ensures we wait and retry when all accounts are rate-limited
+          const quietMode = config.quiet_mode;
+
+          // Helper to show toast without blocking on abort (respects quiet_mode)
           const showToast = async (message: string, variant: "info" | "warning" | "success" | "error") => {
+            if (quietMode) return;
             if (abortSignal?.aborted) return;
             try {
               await client.tui.showToast({
@@ -871,10 +878,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
               // TUI may not be available
             }
           };
-
-          // Use while(true) loop to handle rate limits with backoff
-          // This ensures we wait and retry when all accounts are rate-limited
-          const quietMode = config.quiet_mode;
           
           const hasOtherAccountWithAntigravity = (currentAccount: any): boolean => {
             if (family !== "gemini") return false;
@@ -903,8 +906,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
             );
             
             if (!account) {
+              const headerStyle = getHeaderStyleFromUrl(urlString, family);
+              const explicitQuota = isExplicitQuotaFromUrl(urlString);
               // All accounts are rate-limited - wait and retry
-              const waitMs = accountManager.getMinWaitTimeForFamily(family, model) || 60_000;
+              const waitMs = accountManager.getMinWaitTimeForFamily(
+                family,
+                model,
+                headerStyle,
+                explicitQuota,
+              ) || 60_000;
               const waitSecValue = Math.max(1, Math.ceil(waitMs / 1000));
 
               pushDebug(`all-rate-limited family=${family} accounts=${accountCount} waitMs=${waitMs}`);
@@ -955,8 +965,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
               });
             }
 
-            // Show toast when switching to a different account (debounced, respects quiet mode)
-            if (!quietMode && accountCount > 1 && accountManager.shouldShowAccountToast(account.index)) {
+            // Show toast when switching to a different account (debounced, quiet_mode handled by showToast)
+            if (accountCount > 1 && accountManager.shouldShowAccountToast(account.index)) {
               const accountLabel = account.email || `Account ${account.index + 1}`;
               await showToast(
                 `Using ${accountLabel} (${account.index + 1}/${accountCount})`,
@@ -1153,12 +1163,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 if (alternateStyle && alternateStyle !== headerStyle) {
                   const quotaName = headerStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
                   const altQuotaName = alternateStyle === "gemini-cli" ? "Gemini CLI" : "Antigravity";
-                  if (!quietMode) {
-                    await showToast(
-                      `${quotaName} quota exhausted, using ${altQuotaName} quota`,
-                      "warning"
-                    );
-                  }
+                  await showToast(
+                    `${quotaName} quota exhausted, using ${altQuotaName} quota`,
+                    "warning"
+                  );
                   headerStyle = alternateStyle;
                   pushDebug(`quota fallback: ${headerStyle}`);
                 } else {
@@ -1244,7 +1252,9 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     tokenConsumed = false;
                   }
 
-                  const headerRetryMs = retryAfterMsFromResponse(response);
+                  const defaultRetryMs = (config.default_retry_after_seconds ?? 60) * 1000;
+                  const maxBackoffMs = (config.max_backoff_seconds ?? 60) * 1000;
+                  const headerRetryMs = retryAfterMsFromResponse(response, defaultRetryMs);
                   const bodyInfo = await extractRetryInfoFromBody(response);
                   const serverRetryMs = bodyInfo.retryDelayMs ?? headerRetryMs;
 
@@ -1472,12 +1482,10 @@ export const createAntigravityPlugin = (providerId: string) => async (
                     const cloned = response.clone();
                     const bodyText = await cloned.text();
                     if (bodyText.includes("Prompt is too long") || bodyText.includes("prompt_too_long")) {
-                      if (!quietMode) {
-                        await showToast(
-                          "Context too long - use /compact to reduce size",
-                          "warning"
-                        );
-                      }
+                      await showToast(
+                        "Context too long - use /compact to reduce size",
+                        "warning"
+                      );
                       const errorMessage = `[Antigravity Error] Context is too long for this model.\n\nPlease use /compact to reduce context size, then retry your request.\n\nAlternatively, you can:\n- Use /clear to start fresh\n- Use /undo to remove recent messages\n- Switch to a model with larger context window`;
                       return createSyntheticErrorResponse(errorMessage, prepared.requestedModel);
                     }
@@ -1543,7 +1551,7 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
                 // Check for context errors and show appropriate toast
                 const contextError = transformedResponse.headers.get("x-antigravity-context-error");
-                if (contextError && !quietMode) {
+                if (contextError) {
                   if (contextError === "prompt_too_long") {
                     await showToast(
                       "Context too long - use /compact to reduce size, or trim your request",
@@ -1681,19 +1689,92 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
             // Check for existing accounts and prompt user for login mode
             let startFresh = true;
+            let refreshAccountIndex: number | undefined;
             const existingStorage = await loadAccounts();
             if (existingStorage && existingStorage.accounts.length > 0) {
-              const existingAccounts = existingStorage.accounts.map((acc, idx) => ({
-                email: acc.email,
-                index: idx,
-              }));
+              const now = Date.now();
+              const existingAccounts = existingStorage.accounts.map((acc, idx) => {
+                let status: 'active' | 'rate-limited' | 'expired' | 'unknown' = 'unknown';
+                
+                const rateLimits = acc.rateLimitResetTimes;
+                if (rateLimits) {
+                  const isRateLimited = Object.values(rateLimits).some(
+                    (resetTime) => typeof resetTime === 'number' && resetTime > now
+                  );
+                  if (isRateLimited) {
+                    status = 'rate-limited';
+                  } else {
+                    status = 'active';
+                  }
+                } else {
+                  status = 'active';
+                }
+
+                if (acc.coolingDownUntil && acc.coolingDownUntil > now) {
+                  status = 'rate-limited';
+                }
+
+                return {
+                  email: acc.email,
+                  index: idx,
+                  addedAt: acc.addedAt,
+                  lastUsed: acc.lastUsed,
+                  status,
+                  isCurrentAccount: idx === (existingStorage.activeIndex ?? 0),
+                };
+              });
               
-              const loginMode = await promptLoginMode(existingAccounts);
-              startFresh = loginMode === "fresh";
+              const menuResult = await promptLoginMode(existingAccounts);
               
-              if (startFresh) {
-                console.log("\nStarting fresh - existing accounts will be replaced.\n");
+              if (menuResult.mode === "cancel") {
+                return {
+                  url: "",
+                  instructions: "Authentication cancelled",
+                  method: "auto",
+                  callback: async () => ({ type: "failed", error: "Authentication cancelled" }),
+                };
+              }
+              
+              if (menuResult.deleteAccountIndex !== undefined) {
+                const updatedAccounts = existingStorage.accounts.filter(
+                  (_, idx) => idx !== menuResult.deleteAccountIndex
+                );
+                await saveAccounts({
+                  version: 3,
+                  accounts: updatedAccounts,
+                  activeIndex: 0,
+                  activeIndexByFamily: { claude: 0, gemini: 0 },
+                });
+                console.log("\nAccount deleted.\n");
+                
+                if (updatedAccounts.length > 0) {
+                  return {
+                    url: "",
+                    instructions: "Account deleted. Please run `opencode auth login` again to continue.",
+                    method: "auto",
+                    callback: async () => ({ type: "failed", error: "Account deleted - please re-run auth" }),
+                  };
+                }
+              }
+
+              if (menuResult.refreshAccountIndex !== undefined) {
+                refreshAccountIndex = menuResult.refreshAccountIndex;
+                const refreshEmail = existingStorage.accounts[refreshAccountIndex]?.email;
+                console.log(`\nRe-authenticating ${refreshEmail || 'account'}...\n`);
+                startFresh = false;
+              }
+              
+              if (menuResult.deleteAll) {
+                await clearAccounts();
+                console.log("\nAll accounts deleted.\n");
+                startFresh = true;
               } else {
+                startFresh = menuResult.mode === "fresh";
+              }
+              
+              if (startFresh && !menuResult.deleteAll) {
+                console.log("\nStarting fresh - existing accounts will be replaced.\n");
+              } else if (!startFresh) {
                 console.log("\nAdding to existing accounts.\n");
               }
             }
@@ -1803,7 +1884,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
 
               accounts.push(result);
 
-              // Show toast for successful account authentication
               try {
                 await client.tui.showToast({
                   body: {
@@ -1812,15 +1892,40 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   },
                 });
               } catch {
-                // TUI may not be available in CLI mode
               }
 
               try {
-                // Use startFresh only on first account, subsequent accounts always append
-                const isFirstAccount = accounts.length === 1;
-                await persistAccountPool([result], isFirstAccount && startFresh);
+                if (refreshAccountIndex !== undefined) {
+                  const currentStorage = await loadAccounts();
+                  if (currentStorage) {
+                    const updatedAccounts = [...currentStorage.accounts];
+                    const parts = parseRefreshParts(result.refresh);
+                    if (parts.refreshToken) {
+                      updatedAccounts[refreshAccountIndex] = {
+                        email: result.email ?? updatedAccounts[refreshAccountIndex]?.email,
+                        refreshToken: parts.refreshToken,
+                        projectId: parts.projectId ?? updatedAccounts[refreshAccountIndex]?.projectId,
+                        managedProjectId: parts.managedProjectId ?? updatedAccounts[refreshAccountIndex]?.managedProjectId,
+                        addedAt: updatedAccounts[refreshAccountIndex]?.addedAt ?? Date.now(),
+                        lastUsed: Date.now(),
+                      };
+                      await saveAccounts({
+                        version: 3,
+                        accounts: updatedAccounts,
+                        activeIndex: currentStorage.activeIndex,
+                        activeIndexByFamily: currentStorage.activeIndexByFamily,
+                      });
+                    }
+                  }
+                } else {
+                  const isFirstAccount = accounts.length === 1;
+                  await persistAccountPool([result], isFirstAccount && startFresh);
+                }
               } catch {
-                // ignore
+              }
+
+              if (refreshAccountIndex !== undefined) {
+                break;
               }
 
               if (accounts.length >= MAX_OAUTH_ACCOUNTS) {
@@ -1854,7 +1959,6 @@ export const createAntigravityPlugin = (providerId: string) => async (
               };
             }
 
-            // Get the actual deduplicated account count from storage
             let actualAccountCount = accounts.length;
             try {
               const finalStorage = await loadAccounts();
@@ -1862,12 +1966,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
                 actualAccountCount = finalStorage.accounts.length;
               }
             } catch {
-              // Fall back to accounts.length if we can't read storage
             }
+
+            const successMessage = refreshAccountIndex !== undefined
+              ? `Token refreshed successfully.`
+              : `Multi-account setup complete (${actualAccountCount} account(s)).`;
 
             return {
               url: "",
-              instructions: `Multi-account setup complete (${actualAccountCount} account(s)).`,
+              instructions: successMessage,
               method: "auto",
               callback: async (): Promise<AntigravityTokenExchangeResult> => primary,
             };
