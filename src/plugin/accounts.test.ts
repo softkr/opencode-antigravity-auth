@@ -1218,7 +1218,10 @@ describe("AccountManager", () => {
       });
 
       it("returns short backoff for MODEL_CAPACITY_EXHAUSTED", () => {
-        expect(calculateBackoffMs("MODEL_CAPACITY_EXHAUSTED", 0)).toBe(15_000);
+        // Base backoff is 45s with ±15s jitter (range: 30s to 60s)
+        const result = calculateBackoffMs("MODEL_CAPACITY_EXHAUSTED", 0);
+        expect(result).toBeGreaterThanOrEqual(30_000);
+        expect(result).toBeLessThanOrEqual(60_000);
       });
 
       it("returns soft retry for SERVER_ERROR", () => {
