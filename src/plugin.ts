@@ -956,10 +956,26 @@ export const createAntigravityPlugin = (providerId: string) => async (
           // This ensures we wait and retry when all accounts are rate-limited
           const quietMode = config.quiet_mode;
 
+          // Debounce rate limit toasts to avoid spam (5s cooldown per message type)
+          const rateLimitToastCooldowns = new Map<string, number>();
+          const RATE_LIMIT_TOAST_COOLDOWN_MS = 5000;
+
           // Helper to show toast without blocking on abort (respects quiet_mode)
           const showToast = async (message: string, variant: "info" | "warning" | "success" | "error") => {
             if (quietMode) return;
             if (abortSignal?.aborted) return;
+            
+            // Debounce rate limit warnings to prevent toast spam
+            if (variant === "warning" && message.toLowerCase().includes("rate")) {
+              const toastKey = message.replace(/\d+/g, "X"); // Normalize numbers for grouping
+              const lastShown = rateLimitToastCooldowns.get(toastKey) ?? 0;
+              const now = Date.now();
+              if (now - lastShown < RATE_LIMIT_TOAST_COOLDOWN_MS) {
+                return; // Skip - shown recently
+              }
+              rateLimitToastCooldowns.set(toastKey, now);
+            }
+            
             try {
               await client.tui.showToast({
                 body: { message, variant },
@@ -1381,11 +1397,15 @@ export const createAntigravityPlugin = (providerId: string) => async (
                        capacityRetryCount++;
                        i -= 1;
                        continue; 
-                     } else {
-                       pushDebug(`Max capacity retries (3) exhausted for endpoint ${currentEndpoint}, trying next endpoint...`);
-                       // Do not decrement i, loop will advance to next endpoint
-                       continue;
-                     }
+                      } else {
+                        pushDebug(`Max capacity retries (3) exhausted for endpoint ${currentEndpoint}, regenerating fingerprint...`);
+                        // Regenerate fingerprint to get fresh device identity before trying next endpoint
+                        const newFingerprint = accountManager.regenerateAccountFingerprint(account.index);
+                        if (newFingerprint) {
+                          pushDebug(`Fingerprint regenerated for account ${account.index}`);
+                        }
+                        continue;
+                      }
                   }
 
                   // STRATEGY 2: RATE LIMIT EXCEEDED (RPM) / QUOTA EXHAUSTED / UNKNOWN
