@@ -806,6 +806,17 @@ export class AccountManager {
     return true;
   }
 
+  removeAccountByIndex(accountIndex: number): boolean {
+    if (accountIndex < 0 || accountIndex >= this.accounts.length) {
+      return false;
+    }
+    const account = this.accounts[accountIndex];
+    if (!account) {
+      return false;
+    }
+    return this.removeAccount(account);
+  }
+
   removeAccount(account: ManagedAccount): boolean {
     const idx = this.accounts.indexOf(account);
     if (idx < 0) {

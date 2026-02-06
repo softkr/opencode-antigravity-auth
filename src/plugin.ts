@@ -2321,6 +2321,8 @@ export const createAntigravityPlugin = (providerId: string) => async (
                   activeIndex: 0,
                   activeIndexByFamily: { claude: 0, gemini: 0 },
                 });
+                // Sync in-memory state so deleted account stops being used immediately
+                activeAccountManager?.removeAccountByIndex(menuResult.deleteAccountIndex);
                 console.log("\nAccount deleted.\n");
 
                 if (updatedAccounts.length > 0) {
