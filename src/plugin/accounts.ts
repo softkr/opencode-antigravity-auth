@@ -802,6 +802,16 @@ export class AccountManager {
       return false;
     }
     account.enabled = enabled;
+
+    if (!enabled) {
+      for (const family of Object.keys(this.currentAccountIndexByFamily) as ModelFamily[]) {
+        if (this.currentAccountIndexByFamily[family] === accountIndex) {
+          const next = this.accounts.find((a, i) => i !== accountIndex && a.enabled !== false);
+          this.currentAccountIndexByFamily[family] = next?.index ?? -1;
+        }
+      }
+    }
+
     this.requestSaveToDisk();
     return true;
   }
