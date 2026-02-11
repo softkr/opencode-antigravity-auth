@@ -22,15 +22,12 @@ const ARCHITECTURES = ["x64", "arm64"];
 
 const IDE_TYPES = [
   "ANTIGRAVITY",
-  "IDE_UNSPECIFIED",
-];
+] as const;
 
 const PLATFORMS = [
-  "PLATFORM_UNSPECIFIED",
   "WINDOWS",
   "MACOS",
-  "LINUX",
-];
+] as const;
 
 const SDK_CLIENTS = [
   "google-cloud-sdk vscode_cloudshelleditor/0.1",
@@ -90,18 +87,14 @@ function generateSessionToken(): string {
  * Each fingerprint represents a unique "device" identity.
  */
 export function generateFingerprint(): Fingerprint {
-  const platform = randomFrom(["darwin", "win32", "linux"]);
+  const platform = randomFrom(["darwin", "win32"] as const);
   const arch = randomFrom(ARCHITECTURES);
-  const osVersion = randomFrom(OS_VERSIONS[platform] ?? OS_VERSIONS.linux!);
+  const osVersion = randomFrom(OS_VERSIONS[platform] ?? OS_VERSIONS.darwin!);
 
   const matchingPlatform =
-    platform === "darwin"
-      ? "MACOS"
-      : platform === "win32"
-        ? "WINDOWS"
-        : platform === "linux"
-          ? "LINUX"
-          : randomFrom(PLATFORMS);
+    platform === "win32"
+      ? "WINDOWS"
+      : "MACOS";
 
   return {
     deviceId: generateDeviceId(),
@@ -126,13 +119,9 @@ export function collectCurrentFingerprint(): Fingerprint {
   const arch = os.arch();
 
   const matchingPlatform =
-    platform === "darwin"
-      ? "MACOS"
-      : platform === "win32"
-        ? "WINDOWS"
-        : platform === "linux"
-          ? "LINUX"
-          : "PLATFORM_UNSPECIFIED";
+    platform === "win32"
+      ? "WINDOWS"
+      : "MACOS";
 
   return {
     deviceId: generateDeviceId(),

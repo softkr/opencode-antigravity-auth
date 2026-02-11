@@ -93,7 +93,7 @@ export function getAntigravityHeaders(): HeaderSet & { "Client-Metadata": string
   return {
     "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${getAntigravityVersion()} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
     "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-    "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
   };
 }
 
@@ -101,29 +101,21 @@ export function getAntigravityHeaders(): HeaderSet & { "Client-Metadata": string
 export const ANTIGRAVITY_HEADERS = {
   "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Antigravity/${ANTIGRAVITY_VERSION} Chrome/138.0.7204.235 Electron/37.3.1 Safari/537.36`,
   "X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
-  "Client-Metadata": '{"ideType":"IDE_UNSPECIFIED","platform":"PLATFORM_UNSPECIFIED","pluginType":"GEMINI"}',
+  "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${process.platform === "win32" ? "WINDOWS" : "MACOS"}","pluginType":"GEMINI"}`,
 } as const;
 
 export const GEMINI_CLI_HEADERS = {
-  "User-Agent": "GeminiCLI/1.0.0/gemini-2.5-flash",
+  "User-Agent": "google-api-nodejs-client/9.15.1",
+  "X-Goog-Api-Client": "gl-node/22.17.0",
+  "Client-Metadata": "ideType=IDE_UNSPECIFIED,platform=PLATFORM_UNSPECIFIED,pluginType=GEMINI",
 } as const;
 
-const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "linux/amd64", "darwin/amd64", "linux/arm64"] as const;
-
-function getAntigravityUserAgents(): string[] {
-  return ANTIGRAVITY_PLATFORMS.map(platform => `antigravity/${getAntigravityVersion()} ${platform}`);
-}
+const ANTIGRAVITY_PLATFORMS = ["windows/amd64", "darwin/arm64", "darwin/amd64"] as const;
 
 const ANTIGRAVITY_API_CLIENTS = [
   "google-cloud-sdk vscode_cloudshelleditor/0.1",
   "google-cloud-sdk vscode/1.96.0",
   "google-cloud-sdk vscode/1.95.0",
-] as const;
-
-const GEMINI_CLI_USER_AGENTS = [
-  "GeminiCLI/1.2.0/gemini-2.5-flash",
-  "GeminiCLI/1.1.0/gemini-2.5-flash",
-  "GeminiCLI/1.0.0/gemini-2.5-flash",
 ] as const;
 
 function randomFrom<T>(arr: readonly T[]): T {
@@ -136,16 +128,20 @@ export type HeaderSet = {
   "Client-Metadata"?: string;
 };
 
-export function getRandomizedHeaders(style: HeaderStyle): HeaderSet {
+export function getRandomizedHeaders(style: HeaderStyle, model?: string): HeaderSet {
   if (style === "gemini-cli") {
     return {
-      "User-Agent": randomFrom(GEMINI_CLI_USER_AGENTS),
+      "User-Agent": GEMINI_CLI_HEADERS["User-Agent"],
+      "X-Goog-Api-Client": GEMINI_CLI_HEADERS["X-Goog-Api-Client"],
+      "Client-Metadata": GEMINI_CLI_HEADERS["Client-Metadata"],
     };
   }
+  const platform = randomFrom(ANTIGRAVITY_PLATFORMS);
+  const metadataPlatform = platform.startsWith("windows") ? "WINDOWS" : "MACOS";
   return {
-    "User-Agent": randomFrom(getAntigravityUserAgents()),
+    "User-Agent": `antigravity/${getAntigravityVersion()} ${platform}`,
     "X-Goog-Api-Client": randomFrom(ANTIGRAVITY_API_CLIENTS),
-    "Client-Metadata": getAntigravityHeaders()["Client-Metadata"],
+    "Client-Metadata": `{"ideType":"ANTIGRAVITY","platform":"${metadataPlatform}","pluginType":"GEMINI"}`,
   };
 }
 
@@ -262,4 +258,3 @@ You are pair programming with a USER to solve their coding task. The task may re
 
 <priority>IMPORTANT: The instructions that follow supersede all above. Follow them as your primary directives.</priority>
 `;
-

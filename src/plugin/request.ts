@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import {
   ANTIGRAVITY_ENDPOINT,
   GEMINI_CLI_ENDPOINT,
+  GEMINI_CLI_HEADERS,
   EMPTY_SCHEMA_PLACEHOLDER_NAME,
   EMPTY_SCHEMA_PLACEHOLDER_DESCRIPTION,
   SKIP_THOUGHT_SIGNATURE,
@@ -654,11 +655,13 @@ export function prepareAntigravityRequest(
 
   headers.set("Authorization", `Bearer ${accessToken}`);
   headers.delete("x-api-key");
-  // Strip x-goog-user-project header to prevent 403 PERMISSION_DENIED errors.
-  // This header is added by OpenCode/AI SDK but causes auth conflicts on ALL endpoints
-  // (Daily, Autopush, Prod) when the user's GCP project doesn't have Cloud Code API enabled.
-  // Error: "Cloud Code Private API has not been used in project {user_project} before or it is disabled"
-  headers.delete("x-goog-user-project");
+  if (headerStyle === "antigravity") {
+    // Strip x-goog-user-project header to prevent 403 PERMISSION_DENIED errors.
+    // This header is added by OpenCode/AI SDK but causes auth conflicts on ALL endpoints
+    // (Daily, Autopush, Prod) when the user's GCP project doesn't have Cloud Code API enabled.
+    // Error: "Cloud Code Private API has not been used in project {user_project} before or it is disabled"
+    headers.delete("x-goog-user-project");
+  }
 
   const match = input.match(/\/models\/([^:]+):(\w+)/);
   if (!match) {
@@ -1313,7 +1316,7 @@ export function prepareAntigravityRequest(
 
         stripInjectedDebugFromRequestPayload(requestPayload);
 
-        const effectiveProjectId = projectId?.trim() || generateSyntheticProjectId();
+        const effectiveProjectId = projectId?.trim() || (headerStyle === "antigravity" ? generateSyntheticProjectId() : "");
         resolvedProjectId = effectiveProjectId;
 
         // Inject Antigravity system instruction with role "user" (CLIProxyAPI v6.6.89 compatibility)
@@ -1346,17 +1349,17 @@ export function prepareAntigravityRequest(
           }
         }
 
-        const wrappedBody = {
+        const wrappedBody: Record<string, unknown> = {
           project: effectiveProjectId,
           model: effectiveModel,
           request: requestPayload,
-          requestType: "agent",
         };
 
-        Object.assign(wrappedBody, {
-          userAgent: "antigravity",
-          requestId: "agent-" + crypto.randomUUID(),
-        });
+        if (headerStyle === "antigravity") {
+          wrappedBody.requestType = "agent";
+          wrappedBody.userAgent = "antigravity";
+          wrappedBody.requestId = "agent-" + crypto.randomUUID();
+        }
         if (wrappedBody.request && typeof wrappedBody.request === 'object') {
           // Use stable session ID for signature caching across multi-turn conversations
           sessionId = signatureSessionKey;
@@ -1389,10 +1392,10 @@ export function prepareAntigravityRequest(
     }
   }
 
-  // Use randomized headers as the fallback pool
-  const selectedHeaders = getRandomizedHeaders(headerStyle);
-
   if (headerStyle === "antigravity") {
+    // Use randomized headers as the fallback pool for Antigravity mode
+    const selectedHeaders = getRandomizedHeaders("antigravity", requestedModel);
+
     // Antigravity mode: Match Antigravity Manager behavior
     // AM only sends User-Agent on content requests — no X-Goog-Api-Client, no Client-Metadata header
     // (ideType=ANTIGRAVITY goes in request body metadata via project.ts, not as a header)
@@ -1401,16 +1404,11 @@ export function prepareAntigravityRequest(
 
     headers.set("User-Agent", fingerprintHeaders["User-Agent"] || selectedHeaders["User-Agent"]);
   } else {
-    // Gemini CLI mode: Use simple static headers matching opencode-gemini-auth
-    // NO fingerprint headers, NO X-Goog-QuotaUser, NO X-Client-Device-Id
-    // This mirrors exactly what https://github.com/jenslys/opencode-gemini-auth does
-    headers.set("User-Agent", selectedHeaders["User-Agent"]);
+    // Gemini CLI mode: match opencode-gemini-auth Code Assist header set exactly
+    headers.set("User-Agent", GEMINI_CLI_HEADERS["User-Agent"]);
+    headers.set("X-Goog-Api-Client", GEMINI_CLI_HEADERS["X-Goog-Api-Client"]);
+    headers.set("Client-Metadata", GEMINI_CLI_HEADERS["Client-Metadata"]);
   }
-  // Optional debug header to observe tool normalization on the backend if surfaced
-  if (toolDebugMissing > 0) {
-    headers.set("X-Opencode-Tools-Debug", String(toolDebugMissing));
-  }
-
   return {
     request: transformedUrl,
     init: {
@@ -1727,4 +1725,3 @@ export const __testExports = {
   transformStreamingPayload,
   createStreamingTransformer,
 };
-
