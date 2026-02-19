@@ -3,7 +3,7 @@ import { loadAccounts, saveAccounts, type AccountStorageV4, type AccountMetadata
 import type { OAuthAuthDetails, RefreshParts } from "./types";
 import type { AccountSelectionStrategy } from "./config/schema";
 import { getHealthTracker, getTokenTracker, selectHybridAccount, type AccountWithMetrics } from "./rotation";
-import { generateFingerprint, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
+import { generateFingerprint, updateFingerprintVersion, type Fingerprint, type FingerprintVersion, MAX_FINGERPRINT_HISTORY } from "./fingerprint";
 import type { QuotaGroup, QuotaGroupSummary } from "./quota";
 import { getModelFamily } from "./transform/model-resolver";
 import { debugLogToFile } from "./debug";
@@ -371,6 +371,16 @@ export class AccountManager {
         })
         .filter((a): a is ManagedAccount => a !== null);
 
+      // Update fingerprint versions to match the current runtime version.
+      // Saved fingerprints may carry an older version string; this ensures
+      // they always reflect the latest fetched (or fallback) version.
+      let fingerprintVersionChanged = false;
+      for (const acc of this.accounts) {
+        if (acc.fingerprint && updateFingerprintVersion(acc.fingerprint)) {
+          fingerprintVersionChanged = true;
+        }
+      }
+
       this.cursor = clampNonNegativeInt(stored.activeIndex, 0);
       if (this.accounts.length > 0) {
         this.cursor = this.cursor % this.accounts.length;
@@ -383,6 +393,11 @@ export class AccountManager {
           stored.activeIndexByFamily?.gemini,
           defaultIndex
         ) % this.accounts.length;
+      }
+
+      // Persist updated fingerprint versions to disk
+      if (fingerprintVersionChanged) {
+        this.requestSaveToDisk();
       }
 
       return;
