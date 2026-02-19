@@ -4,12 +4,12 @@
  * Logging behavior:
  * - debug disabled → no logs anywhere
  * - debug enabled → log files only (via debug.ts logWriter)
- * - debug enabled → log files + TUI log panel
+ * - debug_tui enabled → log files + TUI log panel
  * - OPENCODE_ANTIGRAVITY_CONSOLE_LOG=1 → console output (independent of debug flags)
  */
 
 import type { PluginClient } from "./types";
-import { isDebugEnabled } from "./debug";
+import { isDebugTuiEnabled } from "./debug";
 
 type LogLevel = "debug" | "info" | "warn" | "error";
 
@@ -65,8 +65,8 @@ export function createLogger(module: string): Logger {
   const service = `antigravity.${module}`;
 
   const log = (level: LogLevel, message: string, extra?: Record<string, unknown>): void => {
-    // TUI logging: only when debug is enabled
-    if (isDebugEnabled()) {
+    // TUI logging: only when debug TUI is enabled
+    if (isDebugTuiEnabled()) {
       const app = _client?.app;
       if (app && typeof app.log === "function") {
         app

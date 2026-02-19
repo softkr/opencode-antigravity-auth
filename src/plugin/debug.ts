@@ -17,6 +17,7 @@ export const DEBUG_MESSAGE_PREFIX = "[opencode-antigravity-auth debug]";
 interface DebugState {
   debugLevel: number;
   debugEnabled: boolean;
+  debugTuiEnabled: boolean;
   verboseEnabled: boolean;
   logFilePath: string | undefined;
   logWriter: (line: string) => void;
@@ -101,6 +102,7 @@ export function initializeDebug(config: AntigravityConfig): void {
   const debugLevel = config.debug ? (envDebugFlag === "2" || envDebugFlag === "verbose" ? 2 : 1) : parseDebugLevel(envDebugFlag);
   const debugEnabled = debugLevel >= 1;
   const verboseEnabled = debugLevel >= 2;
+  const debugTuiEnabled = debugEnabled && (config.debug_tui || env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "1" || env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "true");
   const logFilePath = debugEnabled ? createLogFilePath(config.log_dir) : undefined;
   const logWriter = createLogWriter(logFilePath);
 
@@ -111,6 +113,7 @@ export function initializeDebug(config: AntigravityConfig): void {
   debugState = {
     debugLevel,
     debugEnabled,
+    debugTuiEnabled,
     verboseEnabled,
     logFilePath,
     logWriter,
@@ -128,12 +131,14 @@ function getDebugState(): DebugState {
     const debugLevel = parseDebugLevel(envDebugFlag);
     const debugEnabled = debugLevel >= 1;
     const verboseEnabled = debugLevel >= 2;
+    const debugTuiEnabled = debugEnabled && (env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "1" || env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "true");
     const logFilePath = debugEnabled ? createLogFilePath() : undefined;
     const logWriter = createLogWriter(logFilePath);
 
     debugState = {
       debugLevel,
       debugEnabled,
+      debugTuiEnabled,
       verboseEnabled,
       logFilePath,
       logWriter,
@@ -148,6 +153,10 @@ function getDebugState(): DebugState {
 
 export function isDebugEnabled(): boolean {
   return getDebugState().debugEnabled;
+}
+
+export function isDebugTuiEnabled(): boolean {
+  return getDebugState().debugTuiEnabled;
 }
 
 export function isVerboseEnabled(): boolean {

@@ -96,6 +96,14 @@ export const AntigravityConfigSchema = z.object({
    * @default false
    */
   debug: z.boolean().default(false),
+
+  /**
+   * Show debug logs in the TUI log panel.
+   * Requires `debug: true` to have any effect.
+   * Env override: OPENCODE_ANTIGRAVITY_DEBUG_TUI=1
+   * @default false
+   */
+  debug_tui: z.boolean().default(false),
   
   /**
    * Custom directory for debug logs.
@@ -435,6 +443,7 @@ export const DEFAULT_CONFIG: AntigravityConfig = {
   quiet_mode: false,
   toast_scope: 'root_only',
   debug: false,
+  debug_tui: false,
   keep_thinking: false,
   session_recovery: true,
   auto_resume: true,

@@ -369,7 +369,37 @@ function sanitizeRequestPayloadForAntigravity(payload: Record<string, unknown>):
 
         const contentRecord = content as Record<string, unknown>;
         const rawParts = Array.isArray(contentRecord.parts) ? contentRecord.parts : [];
-        const sanitizedParts = rawParts.filter(isValidRequestPart);
+        let foundFirstFunctionCall = false;
+
+        const sanitizedParts = rawParts.filter(isValidRequestPart).map((part: any) => {
+          if (part && typeof part === "object" && part.functionCall) {
+            let sig = part.thoughtSignature || part.thought_signature;
+
+            // Only the first functionCall part in a block should have the signature.
+            // If it's the first one and missing a valid signature, inject the sentinel
+            // to prevent the API from rejecting the request with a 400 error.
+            if (!foundFirstFunctionCall) {
+              foundFirstFunctionCall = true;
+              if (!sig || sig.length < MIN_SIGNATURE_LENGTH) {
+                sig = SKIP_THOUGHT_SIGNATURE;
+              }
+            } else {
+              // Parallel function calls MUST NOT have a signature
+              sig = undefined;
+            }
+
+            if (sig) {
+              return { ...part, thought_signature: sig, thoughtSignature: sig };
+            }
+            
+            // If not the first part, just return the part without adding any signature keys
+            const newPart = { ...part };
+            delete newPart.thoughtSignature;
+            delete newPart.thought_signature;
+            return newPart;
+          }
+          return part;
+        });
 
         if (sanitizedParts.length === 0) {
           return null;
@@ -1236,29 +1266,6 @@ export function prepareAntigravityRequest(
 
         const conversationKey = resolveConversationKey(requestPayload);
         signatureSessionKey = buildSignatureSessionKey(PLUGIN_SESSION_ID, effectiveModel, conversationKey, resolveProjectKey(projectId));
-
-        // Ensure thoughtSignature is present on all functionCall parts if at least one part has it
-        // This is required by Gemini 3.1 Pro which otherwise fails with 400 Bad Request
-        if (Array.isArray(requestPayload.contents)) {
-          requestPayload.contents = requestPayload.contents.map((content: any) => {
-            if (!content || !Array.isArray(content.parts)) return content;
-            
-            // Find if any part has a thoughtSignature
-            const signature = content.parts.find((p: any) => p && typeof p === "object" && typeof p.thoughtSignature === "string")?.thoughtSignature;
-            
-            if (signature) {
-              const newParts = content.parts.map((p: any) => {
-                if (p && typeof p === "object" && p.functionCall && !p.thoughtSignature) {
-                  return { ...p, thoughtSignature: signature };
-                }
-                return p;
-              });
-              return { ...content, parts: newParts };
-            }
-            
-            return content;
-          });
-        }
 
         // For Claude models, filter out unsigned thinking blocks (required by Claude API)
         // Attempts to restore signatures from cache for multi-turn conversations

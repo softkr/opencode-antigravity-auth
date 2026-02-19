@@ -518,31 +518,6 @@ describe("request.ts", () => {
   });
 
   describe("prepareAntigravityRequest", () => {
-    it("copies thoughtSignature to all functionCall parts in the same turn", () => {
-      const mockPayload = {
-        contents: [
-          {
-            role: "model",
-            parts: [
-              { functionCall: { name: "foo", args: {} }, thoughtSignature: "signature-123" },
-              { functionCall: { name: "bar", args: {} } }
-            ]
-          }
-        ]
-      };
-      
-      const result = prepareAntigravityRequest(
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-pro:generateContent",
-        { method: "POST", body: JSON.stringify(mockPayload) },
-        "test-token",
-        "test-project"
-      );
-      
-      const parsedBody = JSON.parse(result.init.body as string);
-      expect(parsedBody.request.contents[0].parts[0].thoughtSignature).toBe("signature-123");
-      expect(parsedBody.request.contents[0].parts[1].thoughtSignature).toBe("signature-123");
-    });
-
     const mockAccessToken = "test-token";
     const mockProjectId = "test-project";
 

@@ -129,6 +129,11 @@ function applyEnvOverrides(config: AntigravityConfig): AntigravityConfig {
       ? env.OPENCODE_ANTIGRAVITY_DEBUG !== "0" && env.OPENCODE_ANTIGRAVITY_DEBUG !== "false"
       : config.debug,
 
+    // OPENCODE_ANTIGRAVITY_DEBUG_TUI=1
+    debug_tui: env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "1" || env.OPENCODE_ANTIGRAVITY_DEBUG_TUI === "true"
+      ? true
+      : config.debug_tui,
+
     // OPENCODE_ANTIGRAVITY_LOG_DIR=/path/to/logs
     log_dir: env.OPENCODE_ANTIGRAVITY_LOG_DIR || config.log_dir,
 
