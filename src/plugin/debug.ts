@@ -1,7 +1,7 @@
 import { createWriteStream, mkdirSync, readdirSync, statSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
-import { homedir } from "node:os";
 import { env } from "node:process";
+import { homedir } from "node:os";
 import type { AntigravityConfig } from "./config";
 import {
   deriveDebugPolicy,
@@ -15,7 +15,7 @@ import {
 import { ensureGitignoreSync } from "./storage";
 
 const MAX_BODY_PREVIEW_CHARS = 12000;
-const MAX_BODY_VERBOSE_CHARS = 50000;
+const MAX_BODY_LOG_CHARS = 50000;
 
 export const DEBUG_MESSAGE_PREFIX = "[opencode-antigravity-auth debug]";
 
@@ -24,10 +24,8 @@ export const DEBUG_MESSAGE_PREFIX = "[opencode-antigravity-auth debug]";
 // =============================================================================
 
 interface DebugState {
-  debugLevel: number;
   debugEnabled: boolean;
   debugTuiEnabled: boolean;
-  verboseEnabled: boolean;
   logFilePath: string | undefined;
   logWriter: (line: string) => void;
 }
@@ -131,7 +129,7 @@ function createLogWriter(filePath?: string): (line: string) => void {
 export function initializeDebug(config: AntigravityConfig): void {
   // Config takes precedence, but env var can force enable for debugging
   const envDebugFlag = env.OPENCODE_ANTIGRAVITY_DEBUG ?? "";
-  const { debugLevel, debugEnabled, verboseEnabled } = deriveDebugPolicy({
+  const { debugEnabled } = deriveDebugPolicy({
     configDebug: config.debug,
     configDebugTui: config.debug_tui,
     envDebugFlag,
@@ -146,10 +144,8 @@ export function initializeDebug(config: AntigravityConfig): void {
   }
 
   debugState = {
-    debugLevel,
     debugEnabled,
     debugTuiEnabled,
-    verboseEnabled,
     logFilePath,
     logWriter,
   };
@@ -162,7 +158,7 @@ export function initializeDebug(config: AntigravityConfig): void {
 function getDebugState(): DebugState {
   if (!debugState) {
     // Fallback to env-based initialization for backward compatibility
-    const { debugLevel, debugEnabled, verboseEnabled } = deriveDebugPolicy({
+    const { debugEnabled } = deriveDebugPolicy({
       configDebug: false,
       configDebugTui: false,
       envDebugFlag: env.OPENCODE_ANTIGRAVITY_DEBUG,
@@ -173,10 +169,8 @@ function getDebugState(): DebugState {
     const logWriter = createLogWriter(logFilePath);
 
     debugState = {
-      debugLevel,
       debugEnabled,
       debugTuiEnabled,
-      verboseEnabled,
       logFilePath,
       logWriter,
     };
@@ -194,10 +188,6 @@ export function isDebugEnabled(): boolean {
 
 export function isDebugTuiEnabled(): boolean {
   return getDebugState().debugTuiEnabled;
-}
-
-export function isVerboseEnabled(): boolean {
-  return getDebugState().verboseEnabled;
 }
 
 export function getLogFilePath(): string | undefined {
@@ -413,16 +403,10 @@ export async function logResponseBody(
 ): Promise<string | undefined> {
   const state = getDebugState();
   if (!state.debugEnabled || !context) return undefined;
-  
-  const isError = status >= 400;
-  const shouldLogBody = state.verboseEnabled || isError;
-  
-  if (!shouldLogBody) return undefined;
-  
+
   try {
     const text = await response.clone().text();
-    const maxChars = state.verboseEnabled ? MAX_BODY_VERBOSE_CHARS : MAX_BODY_PREVIEW_CHARS;
-    const preview = truncateTextForLog(text, maxChars);
+    const preview = truncateTextForLog(text, MAX_BODY_LOG_CHARS);
     logDebug(`[Antigravity Debug ${context.id}] Response Body (${status}): ${preview}`);
     return text;
   } catch (e) {
